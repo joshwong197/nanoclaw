@@ -111,7 +111,8 @@ async function syncGroups(projectRoot: string): Promise<void> {
   let syncOk = false;
   try {
     const syncScript = `
-import makeWASocket, { useMultiFileAuthState, makeCacheableSignalKeyStore, Browsers } from '@whiskeysockets/baileys';
+import baileys from '@whiskeysockets/baileys';
+const { makeWASocket, useMultiFileAuthState, makeCacheableSignalKeyStore, Browsers } = baileys;
 import pino from 'pino';
 import path from 'path';
 import fs from 'fs';
@@ -182,7 +183,7 @@ sock.ev.on('connection.update', async (update) => {
     const tmpScript = path.join(projectRoot, '.tmp-group-sync.mjs');
     fs.writeFileSync(tmpScript, syncScript, 'utf-8');
     try {
-      const output = execSync(`node ${tmpScript}`, {
+      const output = execSync(`node "${tmpScript}"`, {
         cwd: projectRoot,
         encoding: 'utf-8',
         timeout: 45000,
