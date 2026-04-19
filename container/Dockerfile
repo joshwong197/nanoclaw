@@ -35,18 +35,10 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --break-system-packages mempalace
 
 # Install Docling for structured document parsing (tables, OCR, layout)
+# Models are NOT pre-downloaded here — they fetch lazily on first use at
+# runtime. Mount a persistent cache volume to avoid re-downloading per
+# container spawn.
 RUN pip install --break-system-packages docling
-
-# Pre-download Docling ML models so first container invocation is fast.
-# Models cache to ~/.cache/docling (root at build time) — copy into /opt
-# and point HF_HOME there so the non-root `node` user can read them.
-RUN docling-tools models download \
-    && mkdir -p /opt/docling-cache \
-    && cp -r /root/.cache/docling /opt/docling-cache/ \
-    && cp -r /root/.cache/huggingface /opt/docling-cache/ 2>/dev/null || true \
-    && chmod -R a+rX /opt/docling-cache
-ENV DOCLING_ARTIFACTS_PATH=/opt/docling-cache/docling/models
-ENV HF_HOME=/opt/docling-cache/huggingface
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
