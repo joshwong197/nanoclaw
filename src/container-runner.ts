@@ -17,6 +17,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -166,6 +167,28 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // MemPalace directory (shared AI memory for all agents)
+  const palaceDir = path.resolve(process.cwd(), '..', 'Midori', 'palace');
+  if (fs.existsSync(palaceDir)) {
+    mounts.push({
+      hostPath: palaceDir,
+      containerPath: '/workspace/palace',
+      readonly: false,
+    });
+  }
+
+  // Midori/ — identity packs (SOUL/SKILLS/HANDOFF), TEAM.md, STATE-OF-THE-TEAM.
+  // Mounted read-only: agents should reference but not mutate their own personas.
+  // Palace handles runtime/writable state; Midori/ is the canonical team truth.
+  const midoriDir = path.resolve(process.cwd(), '..', 'Midori');
+  if (fs.existsSync(midoriDir)) {
+    mounts.push({
+      hostPath: midoriDir,
+      containerPath: '/workspace/midori',
+      readonly: true,
+    });
+  }
+
   // Gmail credentials directory (for Gmail MCP inside the container)
   const homeDir = os.homedir();
   const gmailDir = path.join(homeDir, '.gmail-mcp');
@@ -183,6 +206,7 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'voice'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -250,6 +274,14 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Pass Gemini API key for TTS (if configured)
+  const geminiKey =
+    process.env.GEMINI_API_KEY ||
+    readEnvFile(['GEMINI_API_KEY']).GEMINI_API_KEY;
+  if (geminiKey) {
+    args.push('-e', `GEMINI_API_KEY=${geminiKey}`);
   }
 
   // Runtime-specific args for host gateway resolution

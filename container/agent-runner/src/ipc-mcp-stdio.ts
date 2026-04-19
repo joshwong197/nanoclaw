@@ -40,6 +40,57 @@ const server = new McpServer({
 });
 
 server.tool(
+  'send_voice',
+  "Send a voice note (OGG Opus) to the user or group. Generate the audio FIRST by running `tts generate --agent <AgentName> --text \"<reply>\" --output /workspace/ipc/voice/<unique>.ogg` via the Bash tool, then pass that audioPath here. Use only when voice mode is enabled for the chat. Keep voice replies short (≤50 words, markdown-stripped).",
+  {
+    audioPath: z
+      .string()
+      .describe(
+        'Absolute path to the generated OGG file under /workspace/ipc/voice/ (must be inside the IPC mount so the host can read it).',
+      ),
+    sender: z
+      .string()
+      .optional()
+      .describe(
+        'Your role/identity name (e.g. "Futaba"). When set, voice appears from the dedicated pool bot in Telegram.',
+      ),
+  },
+  async (args) => {
+    const VOICE_PREFIX = '/workspace/ipc/voice/';
+    if (!args.audioPath.startsWith(VOICE_PREFIX)) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `audioPath must be under ${VOICE_PREFIX} (got: ${args.audioPath}).`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    if (!fs.existsSync(args.audioPath)) {
+      return {
+        content: [
+          { type: 'text' as const, text: `Audio file not found: ${args.audioPath}` },
+        ],
+        isError: true,
+      };
+    }
+    const relativePath = args.audioPath.slice(VOICE_PREFIX.length);
+    const data: Record<string, string | undefined> = {
+      type: 'voice',
+      chatJid,
+      audioPath: relativePath,
+      sender: args.sender || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MESSAGES_DIR, data);
+    return { content: [{ type: 'text' as const, text: 'Voice note queued.' }] };
+  },
+);
+
+server.tool(
   'send_message',
   "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
   {

@@ -4,6 +4,8 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { sendPoolMessage, sendPoolVoice } from './channels/telegram.js';
+import { prefixAgentMessage } from './agent-prefix.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -12,6 +14,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendAudio: (jid: string, audio: Buffer) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -81,15 +84,88 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  if (data.sender && data.chatJid.startsWith('tg:')) {
+                    await sendPoolMessage(
+                      data.chatJid,
+                      data.text,
+                      data.sender,
+                      sourceGroup,
+                    );
+                  } else {
+                    const outText = prefixAgentMessage(
+                      data.chatJid,
+                      data.text,
+                      { sender: data.sender, folder: sourceGroup },
+                    );
+                    await deps.sendMessage(data.chatJid, outText);
+                  }
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: data.chatJid, sourceGroup, sender: data.sender },
                     'IPC message sent',
                   );
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'voice' &&
+                data.chatJid &&
+                data.audioPath
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  // audioPath is relative to the group's IPC voice/ dir
+                  const voiceFile = path.join(
+                    ipcBaseDir,
+                    sourceGroup,
+                    'voice',
+                    data.audioPath,
+                  );
+                  if (!fs.existsSync(voiceFile)) {
+                    logger.warn(
+                      { voiceFile, sourceGroup },
+                      'Voice IPC message references missing audio file',
+                    );
+                  } else {
+                    try {
+                      const buf = fs.readFileSync(voiceFile);
+                      if (data.sender && data.chatJid.startsWith('tg:')) {
+                        await sendPoolVoice(
+                          data.chatJid,
+                          buf,
+                          data.sender,
+                          sourceGroup,
+                        );
+                      } else {
+                        await deps.sendAudio(data.chatJid, buf);
+                      }
+                      logger.info(
+                        {
+                          chatJid: data.chatJid,
+                          sourceGroup,
+                          sender: data.sender,
+                          bytes: buf.length,
+                        },
+                        'IPC voice sent',
+                      );
+                    } finally {
+                      // Clean up the audio file so the voice/ dir doesn't grow
+                      try {
+                        fs.unlinkSync(voiceFile);
+                      } catch {
+                        /* best effort */
+                      }
+                    }
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC voice attempt blocked',
                   );
                 }
               }

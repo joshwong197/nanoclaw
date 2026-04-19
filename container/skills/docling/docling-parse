@@ -1,0 +1,114 @@
+#!/bin/bash
+set -euo pipefail
+
+# docling-parse — CLI wrapper around IBM Docling for document parsing.
+# Handles PDF, DOCX, PPTX, HTML, PNG/JPG (OCR). Preserves tables, layout,
+# reading order, and figures. Use this when you need *structure* (tables,
+# forms, multi-column) rather than just plain text.
+
+VERSION="1.0.0"
+
+usage() {
+  cat <<'USAGE'
+docling-parse — Parse documents with layout, tables, and OCR preserved
+
+Usage:
+  docling-parse <path-or-url> [--format md|json] [--ocr auto|on|off]
+  docling-parse help
+
+Arguments:
+  path-or-url  Local file path or http(s) URL to the document
+
+Options:
+  --format     Output format (default: md)
+                 md   — Markdown with structured tables
+                 json — DoclingDocument JSON (full structure tree)
+  --ocr        OCR mode (default: auto)
+                 auto — OCR only when no text layer detected
+                 on   — force OCR on every page
+                 off  — never OCR (fastest; text-layer PDFs only)
+
+Examples:
+  docling-parse invoice.pdf
+  docling-parse statement.pdf --format json
+  docling-parse https://example.com/credit-app.pdf
+  docling-parse scanned.jpg --ocr on
+
+When to use docling-parse vs pdf-reader:
+  Use docling-parse for PDFs/docs with tables, forms, multi-column layout,
+  scanned pages, or where structure matters (credit applications, bank
+  statements, financial statements, court documents).
+
+  Use pdf-reader (pdftotext) for simple text-only PDFs where speed matters
+  more than layout — it's instant, docling takes ~seconds per page.
+USAGE
+}
+
+if [[ $# -eq 0 ]] || [[ "${1:-}" == "help" ]] || [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+SOURCE="$1"
+shift
+
+FORMAT="md"
+OCR_MODE="auto"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --format)
+      FORMAT="$2"
+      shift 2
+      ;;
+    --ocr)
+      OCR_MODE="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$FORMAT" in
+  md|json) ;;
+  *) echo "Invalid --format: $FORMAT (expected md|json)" >&2; exit 2 ;;
+esac
+
+case "$OCR_MODE" in
+  auto|on|off) ;;
+  *) echo "Invalid --ocr: $OCR_MODE (expected auto|on|off)" >&2; exit 2 ;;
+esac
+
+exec python3 - "$SOURCE" "$FORMAT" "$OCR_MODE" <<'PY'
+import sys, json
+from pathlib import Path
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+
+source, fmt, ocr_mode = sys.argv[1], sys.argv[2], sys.argv[3]
+
+pipeline = PdfPipelineOptions()
+if ocr_mode == "on":
+    pipeline.do_ocr = True
+elif ocr_mode == "off":
+    pipeline.do_ocr = False
+# auto: leave default (docling decides per page)
+
+converter = DocumentConverter(
+    format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline)}
+)
+
+result = converter.convert(source)
+doc = result.document
+
+if fmt == "md":
+    sys.stdout.write(doc.export_to_markdown())
+else:
+    json.dump(doc.export_to_dict(), sys.stdout, ensure_ascii=False, indent=2)
+sys.stdout.write("\n")
+PY

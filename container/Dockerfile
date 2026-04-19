@@ -23,9 +23,30 @@ RUN apt-get update && apt-get install -y \
     libdrm2 \
     libxshmfence1 \
     curl \
+    ffmpeg \
     git \
     poppler-utils \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Install MemPalace for AI memory
+RUN pip install --break-system-packages mempalace
+
+# Install Docling for structured document parsing (tables, OCR, layout)
+RUN pip install --break-system-packages docling
+
+# Pre-download Docling ML models so first container invocation is fast.
+# Models cache to ~/.cache/docling (root at build time) — copy into /opt
+# and point HF_HOME there so the non-root `node` user can read them.
+RUN docling-tools models download \
+    && mkdir -p /opt/docling-cache \
+    && cp -r /root/.cache/docling /opt/docling-cache/ \
+    && cp -r /root/.cache/huggingface /opt/docling-cache/ 2>/dev/null || true \
+    && chmod -R a+rX /opt/docling-cache
+ENV DOCLING_ARTIFACTS_PATH=/opt/docling-cache/docling/models
+ENV HF_HOME=/opt/docling-cache/huggingface
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
@@ -53,8 +74,16 @@ RUN npm run build
 COPY skills/pdf-reader/pdf-reader /usr/local/bin/pdf-reader
 RUN chmod +x /usr/local/bin/pdf-reader
 
+# Install docling-parse CLI (structured PDF/docx/image parsing)
+COPY skills/docling/docling-parse /usr/local/bin/docling-parse
+RUN chmod +x /usr/local/bin/docling-parse
+
+# Install TTS skill (Gemini 3.1 Flash TTS)
+COPY skills/tts/ /usr/local/lib/tts/
+RUN chmod +x /usr/local/lib/tts/tts.sh && ln -s /usr/local/lib/tts/tts.sh /usr/local/bin/tts
+
 # Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input /workspace/ipc/voice
 
 # Create entrypoint script
 # Container input (prompt, group info) is passed via stdin JSON.

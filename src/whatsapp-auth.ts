@@ -32,13 +32,17 @@ const _generics = _require(
   '@whiskeysockets/baileys/lib/Utils/generics',
 ) as Record<string, unknown>;
 const { proto } = _require('@whiskeysockets/baileys') as { proto: any };
-_generics.getPlatformId = (browser: string): string => {
-  const platformType =
-    proto.DeviceProps.PlatformType[
-      browser.toUpperCase() as keyof typeof proto.DeviceProps.PlatformType
-    ];
-  return platformType ? platformType.toString() : '1';
-};
+try {
+  _generics.getPlatformId = (browser: string): string => {
+    const platformType =
+      proto.DeviceProps.PlatformType[
+        browser.toUpperCase() as keyof typeof proto.DeviceProps.PlatformType
+      ];
+    return platformType ? platformType.toString() : '1';
+  };
+} catch {
+  // Baileys 7.x freezes the module namespace and already has the fix — skip.
+}
 
 const AUTH_DIR = './store/auth';
 const QR_FILE = './store/qr-data.txt';

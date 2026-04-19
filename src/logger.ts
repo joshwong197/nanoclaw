@@ -59,7 +59,24 @@ function log(
   }
 }
 
-export const logger = {
+type LogFn = (
+  dataOrMsg: Record<string, unknown> | string,
+  msg?: string,
+) => void;
+
+interface Logger {
+  level: string;
+  debug: LogFn;
+  info: LogFn;
+  warn: LogFn;
+  error: LogFn;
+  fatal: LogFn;
+  trace: LogFn;
+  child: () => Logger;
+}
+
+export const logger: Logger = {
+  level: 'info',
   debug: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
     log('debug', dataOrMsg, msg),
   info: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
@@ -70,6 +87,9 @@ export const logger = {
     log('error', dataOrMsg, msg),
   fatal: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
     log('fatal', dataOrMsg, msg),
+  trace: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
+    log('debug', dataOrMsg, msg),
+  child: () => logger,
 };
 
 // Route uncaught errors through logger so they get timestamps in stderr

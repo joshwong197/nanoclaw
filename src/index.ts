@@ -10,9 +10,11 @@ import {
   IDLE_TIMEOUT,
   MAX_MESSAGES_PER_PROMPT,
   POLL_INTERVAL,
+  TELEGRAM_BOT_POOL,
   TIMEZONE,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startDebateServer } from './debate-server.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -50,6 +52,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { prefixAgentMessage } from './agent-prefix.js';
 import {
   restoreRemoteControl,
   startRemoteControl,
@@ -277,7 +280,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
         logger.info({ group: group.name }, `Agent output: ${raw.length} chars`);
         if (text) {
-          await channel.sendMessage(chatJid, text);
+          const outText = prefixAgentMessage(chatJid, text, {
+            folder: group.folder,
+          });
+          if (outText !== text) {
+            logger.debug(
+              { folder: group.folder, raw: text.slice(0, 120), out: outText.slice(0, 120) },
+              'Prefix applied',
+            );
+          }
+          await channel.sendMessage(chatJid, outText);
           outputSentToUser = true;
         }
         // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -567,6 +579,10 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start LQ Council debate endpoint (Akechi-only). Bound to localhost
+  // until cloud deploy — a tunnel or reverse proxy handles public TLS.
+  startDebateServer(3030, '127.0.0.1');
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -681,6 +697,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Initialize Telegram bot pool for agent swarm
+  if (TELEGRAM_BOT_POOL.length > 0) {
+    const { initBotPool } = await import('./channels/telegram.js');
+    await initBotPool(TELEGRAM_BOT_POOL);
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -703,6 +725,14 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendAudio: async (jid, audio) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (!channel.sendAudio) {
+        throw new Error(`Channel ${channel.name} does not support audio`);
+      }
+      return channel.sendAudio(jid, audio);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
