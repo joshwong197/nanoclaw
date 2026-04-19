@@ -1,0 +1,19 @@
+[Unit]
+Description=NanoClaw (Midori) assistant
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/nanoclaw
+ExecStart=/usr/bin/node /root/nanoclaw/dist/index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nanoclaw
+
+[Install]
+WantedBy=multi-user.target
